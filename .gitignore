@@ -4,8 +4,99 @@ __pycache__/
 .venv/
 venv/
 .env
-# Large datasets
+
+# Large datasets & processed data
 *.csv
 *.xlsx
 *.parquet
 .freebuff
+
+# Model checkpoints & scalers 
+saved_models/
+*.pt
+*.pth
+*.joblib
+*.pkl
+
+# Training logs
+logs/
+*.log
+
+# Jupyter / IDE
+.ipynb_checkpoints/
+.vscode/
+
+
+# Root __pycache__
+__pycache__/colab_experiments.cpython-312.pyc
+__pycache__/config.cpython-312.pyc
+__pycache__/deploy_bot.cpython-312.pyc
+__pycache__/main_live.cpython-312.pyc
+__pycache__/run_bot.cpython-312.pyc
+
+# Backtest __pycache__
+backtest/__pycache__/__init__.cpython-312.pyc
+backtest/__pycache__/backtester.cpython-312.pyc
+backtest/__pycache__/metrics.cpython-312.pyc
+backtest/__pycache__/run_backtest.cpython-312.pyc
+
+# Collectors __pycache__
+collectors/__pycache__/calendar_collector.cpython-312.pyc
+collectors/__pycache__/mt5_collector.cpython-312.pyc
+collectors/__pycache__/news_collector.cpython-312.pyc
+
+# Data files
+data/economic_calendar.csv
+data/processed/X_features.parquet
+data/processed/y_labels.parquet
+
+data/raw/XAUUSD_t_H1_raw.parquet
+
+data/raw/XAUUSD_t_H4_raw.parquet
+
+data/raw/XAUUSD_t_M15_raw.parquet
+
+data/raw/XAUUSD_t_M5_raw.parquet
+
+# Execution __pycache__
+execution/__pycache__/__init__.cpython-312.pyc
+execution/__pycache__/order_router.cpython-312.pyc
+execution/__pycache__/risk_manager.cpython-312.pyc
+
+# Features __pycache__
+features/__pycache__/__init__.cpython-312.pyc
+features/__pycache__/correlation_pruner.cpython-312.pyc
+features/__pycache__/labeler.cpython-312.pyc
+features/__pycache__/multi_timeframe.cpython-312.pyc
+features/__pycache__/pipeline.cpython-312.pyc
+features/__pycache__/sessions.cpython-312.pyc
+features/__pycache__/technical.cpython-312.pyc
+features/__pycache__/volume_microstructure.cpython-312.pyc
+
+# Logs
+logs/_wf_diagnose_tmp.py
+logs/deploy_bot.log
+logs/mamba_signal.csv
+logs/run_bot.log
+logs/walkforward_hist.csv
+logs/walkforward_mamba.csv
+
+# Models __pycache__
+models/__pycache__/__init__.cpython-312.pyc
+models/__pycache__/baselines.cpython-312.pyc
+models/__pycache__/mamba_block.cpython-312.pyc
+models/__pycache__/mamba_model.cpython-312.pyc
+
+# Saved models
+saved_models/feature_scaler.joblib
+saved_models/mamba_xauusd_best.pt
+saved_models/mamba_xauusd_latest.pt
+
+# Training __pycache__
+training/__pycache__/__init__.cpython-312.pyc
+training/__pycache__/benchmark.cpython-312.pyc
+training/__pycache__/dataset.cpython-312.pyc
+training/__pycache__/loss.cpython-312.pyc
+training/__pycache__/run_experiments.cpython-312.pyc
+training/__pycache__/train.cpython-312.pyc
+training/__pycache__/walkforward.cpython-312.pyc

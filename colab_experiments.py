@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # Mamba XAUUSD – Colab Experiment Runner
 # ============================================================
 # INSTRUCTIONS:
@@ -100,15 +100,29 @@ for fname in ['X_features.parquet', 'y_labels.parquet']:
     else:
         print(f"[WARN] {src} not found on Drive. Upload it first.")
 
-# ─── CELL 6: Run ALL experiments (A, B, C) ───────────────────
-# This trains 3 models sequentially and prints a comparison table.
-# Estimated time on T4 GPU:  ~15-25 min total
+# ─── CELL 6 (OPTION A - RECOMMENDED): Purged Walk-Forward CV ───────────
+# Trains the Mamba model on 5 chronological folds with purge + embargo.
+# This is the HONEST out-of-sample estimate (Lopez de Prado methodology).
+# Estimated time on T4 GPU: ~2-4 hours (5 folds x 8 epochs, early stopping cuts most folds)
 
 import os
 os.chdir('/content/tradingbot')
-from training.run_experiments import run_all_experiments
+from training.walkforward import run as run_walkforward
 
-df_results = run_all_experiments()
+df_results = run_walkforward(
+    backend="mamba",   # full Mamba multi-task model per fold
+    n_folds=5,
+    epochs=8,          # early stopping (patience=3) will usually cut earlier
+    batch_size=256,
+    patience=3,
+)
+
+# ─── CELL 6 (OPTION B): Quick A/B/C experiments ───────────────────────
+# UNCOMMENT if you want the old 3-variant single-split comparison instead.
+# import os
+# os.chdir('/content/tradingbot')
+# from training.run_experiments import run_all_experiments
+# df_results = run_all_experiments()
 
 # ─── CELL 7: Save checkpoints & results back to Drive ────────
 import shutil
@@ -129,43 +143,43 @@ for f in CKPT_SRC.glob('*.joblib'):
     shutil.copy(f, DRIVE_OUT / f.name)
     print(f"Saved scaler: {f.name}")
 
-# Copy results CSV
-results_csv = LOGS_SRC / 'experiment_results.csv'
-if results_csv.exists():
-    shutil.copy(results_csv, DRIVE_OUT / 'experiment_results.csv')
-    print("Saved experiment_results.csv")
+# Copy results CSVs (walk-forward + old experiments)
+for csv_name in ['experiment_results.csv', 'walkforward_mamba.csv', 'walkforward_hist.csv']:
+    results_csv = LOGS_SRC / csv_name
+    if results_csv.exists():
+        shutil.copy(results_csv, DRIVE_OUT / csv_name)
+        print(f"Saved {csv_name}")
 
 print(f"\nAll outputs saved to: {DRIVE_OUT}")
 
 # ─── CELL 8 (Optional): Plot comparison chart ────────────────
 import matplotlib.pyplot as plt
 import pandas as pd
+import os
 
-df = pd.read_csv('/content/drive/MyDrive/tradingbot_results/experiment_results.csv')
-accs = [float(x.strip('%')) for x in df['OOS Dir Acc']]
-f1s  = [float(x) for x in df['OOS Macro F1']]
-labels = df['Experiment'].tolist()
+_wfcsv = '/content/drive/MyDrive/tradingbot_results/walkforward_mamba.csv'
+if os.path.exists(_wfcsv):
+    df = pd.read_csv(_wfcsv)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig.suptitle('Mamba XAUUSD – Purged Walk-Forward (OOS, honest)', fontsize=14, fontweight='bold')
 
-fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-fig.suptitle('Mamba XAUUSD – Experiment Comparison (OOS)', fontsize=14, fontweight='bold')
+    x = df['fold'].astype(str)
+    axes[0].bar(x - 0.2, df['acc'] * 100, width=0.4, label='Model', color='#3b82f6')
+    axes[0].bar(x + 0.2, df['baseline_acc'] * 100, width=0.4, label='Baseline', color='#94a3b8')
+    axes[0].set_title('Direction Accuracy (%)')
+    axes[0].set_ylabel('Accuracy (%)')
+    axes[0].legend()
 
-colors = ['#3b82f6', '#10b981', '#f59e0b']
+    colors = ['#10b981' if e > 0 else '#ef4444' for e in df['edge_vs_baseline']]
+    axes[1].bar(x, df['edge_vs_baseline'] * 100, color=colors)
+    axes[1].axhline(0, color='black', linewidth=0.8)
+    axes[1].set_title('Edge vs Majority Baseline (%)')
+    axes[1].set_ylabel('Edge (%)')
 
-axes[0].bar(labels, accs, color=colors)
-axes[0].set_title('Direction Accuracy (%)')
-axes[0].set_ylabel('Accuracy (%)')
-axes[0].set_ylim([min(accs)*0.95, max(accs)*1.05])
-for i, v in enumerate(accs):
-    axes[0].text(i, v + 0.1, f'{v:.2f}%', ha='center', fontweight='bold')
-
-axes[1].bar(labels, f1s, color=colors)
-axes[1].set_title('Macro F1 Score')
-axes[1].set_ylabel('F1 Score')
-axes[1].set_ylim([min(f1s)*0.95, max(f1s)*1.05])
-for i, v in enumerate(f1s):
-    axes[1].text(i, v + 0.001, f'{v:.4f}', ha='center', fontweight='bold')
-
-plt.tight_layout()
-plt.savefig('/content/drive/MyDrive/tradingbot_results/experiment_chart.png', dpi=150, bbox_inches='tight')
-plt.show()
-print("Chart saved to Drive.")
+    plt.tight_layout()
+    plt.savefig('/content/drive/MyDrive/tradingbot_results/walkforward_chart.png',
+                dpi=150, bbox_inches='tight')
+    plt.show()
+    print("Walk-forward chart saved to Drive.")
+else:
+    print("[WARN] walkforward_mamba.csv not found — run CELL 6 Option A first.")

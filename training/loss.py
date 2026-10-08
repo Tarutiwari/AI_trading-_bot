@@ -17,7 +17,10 @@ class FocalLoss(nn.Module):
     FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
     """
 
-    def __init__(self, gamma: float = 2.0, alpha: Optional[torch.Tensor] = None):
+    def __init__(self, gamma: float = 0.5, alpha: Optional[torch.Tensor] = None):
+        # FIX: gamma reduced from 2.0 → 0.5
+        # gamma=2.0 was over-focusing on hard/rare neutral samples,
+        # amplifying class imbalance. 0.5 applies mild focus without collapse.
         super().__init__()
         self.gamma = gamma
         self.alpha = alpha
@@ -48,7 +51,7 @@ class MultiTaskTradingLoss(nn.Module):
         alpha_direction: float = 1.0,
         beta_volatility: float = 0.5,
         gamma_regime: float = 0.3,
-        focal_gamma: float = 2.0,
+        focal_gamma: float = 0.5,  # Matches FocalLoss default; low gamma avoids neutral-class collapse
         direction_weights: Optional[torch.Tensor] = None,
     ):
         super().__init__()

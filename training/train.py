@@ -88,23 +88,42 @@ class ModelTrainer:
         return X, y
 
     def prepare_dataloaders(
-        self, X: pd.DataFrame, y: pd.DataFrame
+        self, X: pd.DataFrame, y: pd.DataFrame,
+        train_idx: Optional[np.ndarray] = None,
+        val_idx: Optional[np.ndarray] = None,
+        test_idx: Optional[np.ndarray] = None,
+        batch_size: Optional[int] = None,
     ) -> Tuple[DataLoader, DataLoader, DataLoader, int]:
         """
         Chronological 70% Train / 15% Val / 15% Test split with zero-leakage scaling.
+
+        If train_idx / val_idx / test_idx are provided (e.g. from PurgedWalkForwardCV),
+        those index positions are used instead of the default chronological split.
+        Scaler and vol_scaler are fit ONLY on the provided train indices.
         """
-        n = len(X)
-        train_end = int(n * 0.70)
-        val_end = int(n * 0.85)
+        if train_idx is not None:
+            train_idx = np.asarray(train_idx)
+            val_idx = np.asarray(val_idx) if val_idx is not None else np.array([], dtype=int)
+            test_idx = np.asarray(test_idx) if test_idx is not None else np.array([], dtype=int)
+            X_train_raw = X.iloc[train_idx].values
+            X_val_raw = X.iloc[val_idx].values if len(val_idx) else np.empty((0, X.shape[1]))
+            X_test_raw = X.iloc[test_idx].values if len(test_idx) else np.empty((0, X.shape[1]))
+            y_train = y.iloc[train_idx]
+            y_val = y.iloc[val_idx]
+            y_test = y.iloc[test_idx]
+        else:
+            n = len(X)
+            train_end = int(n * 0.70)
+            val_end = int(n * 0.85)
 
-        X_train_raw = X.iloc[:train_end].values
-        y_train = y.iloc[:train_end]
+            X_train_raw = X.iloc[:train_end].values
+            y_train = y.iloc[:train_end]
 
-        X_val_raw = X.iloc[train_end:val_end].values
-        y_val = y.iloc[train_end:val_end]
+            X_val_raw = X.iloc[train_end:val_end].values
+            y_val = y.iloc[train_end:val_end]
 
-        X_test_raw = X.iloc[val_end:].values
-        y_test = y.iloc[val_end:]
+            X_test_raw = X.iloc[val_end:].values
+            y_test = y.iloc[val_end:]
 
         # Fit scaler ONLY on train split
         X_train = self.scaler.fit_transform(X_train_raw)
@@ -117,9 +136,16 @@ class ModelTrainer:
         y_val_vol = y_val["target_volatility"].values.reshape(-1, 1)
         y_test_vol = y_test["target_volatility"].values.reshape(-1, 1)
 
+        # Vol scaler fit ONLY on train split; transform val/test if they are non-empty
         y_train_vol_scaled = self.vol_scaler.fit_transform(y_train_vol).flatten()
-        y_val_vol_scaled = self.vol_scaler.transform(y_val_vol).flatten()
-        y_test_vol_scaled = self.vol_scaler.transform(y_test_vol).flatten()
+        y_val_vol_scaled = (
+            self.vol_scaler.transform(y_val_vol).flatten()
+            if len(y_val_vol) else np.zeros(0, dtype=float)
+        )
+        y_test_vol_scaled = (
+            self.vol_scaler.transform(y_test_vol).flatten()
+            if len(y_test_vol) else np.zeros(0, dtype=float)
+        )
 
         # Scaler is saved after training completes (see train_model)
         self._scaler_path = self.config.paths.CHECKPOINTS_DIR / "feature_scaler.joblib"
@@ -148,7 +174,11 @@ class ModelTrainer:
             seq_len=seq_len,
         )
 
-        batch_size = self.config.mamba.BATCH_SIZE
+        batch_size = batch_size or self.config.mamba.BATCH_SIZE
+        if len(train_ds) < batch_size:
+            # Prevent an empty train loader (drop_last) on small folds
+            batch_size = max(1, len(train_ds))
+            print(f"[WARN] Train dataset smaller than batch size; lowered batch to {batch_size}")
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=True)
         val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
         test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False)
@@ -255,12 +285,15 @@ class ModelTrainer:
         model.vol_scaler = self.vol_scaler
 
         # Compute inverse-frequency class weights dynamically
+        # Cap at 2.0 to prevent rare neutral class (~5%) from getting 6.6x weight
+        # and causing the model to collapse onto neutral predictions.
         train_targets = train_loader.dataset.target_directions
         class_counts = torch.bincount(train_targets, minlength=3).float()
         class_counts = torch.clamp(class_counts, min=1.0)
         weights = len(train_targets) / (3.0 * class_counts)
+        weights = torch.clamp(weights, max=2.0)  # FIX: prevent neutral over-weighting
         direction_weights = weights.to(self.device)
-        print(f"[INFO] Computed directional class weights: {direction_weights.cpu().tolist()}")
+        print(f"[INFO] Computed directional class weights (capped @ 2.0): {direction_weights.cpu().tolist()}")
 
         alpha_dir = alpha_direction if alpha_direction is not None else m_cfg.ALPHA_DIRECTION
         beta_vol = beta_volatility if beta_volatility is not None else m_cfg.BETA_VOLATILITY
@@ -406,6 +439,9 @@ class ModelTrainer:
         vol_scaler_path = self.config.paths.CHECKPOINTS_DIR / (f"volatility_scaler_{experiment_name}.joblib" if experiment_name else "volatility_scaler.joblib")
         joblib.dump(self.vol_scaler, vol_scaler_path)
         print(f"[SAVED] Volatility scaler saved -> {vol_scaler_path.name}")
+
+        # Cache model for callers (e.g. walk-forward runner) that re-evaluate on test fold
+        self._last_model = model
         return model
 
     def evaluate(
@@ -461,6 +497,14 @@ class ModelTrainer:
                 all_trues_regime.extend(y_reg_b.numpy())
 
         n = len(loader)
+        if n == 0:
+            # Empty loader (e.g. tiny validation fold): return neutral metrics
+            return 0.0, 0.0, 0.0, 0.0, 0.0, {
+                "direction_loss": 0.0,
+                "volatility_loss": 0.0,
+                "regime_loss": 0.0,
+                "per_class_f1": None,
+            }
         avg_loss = total_loss / n
         avg_loss_dir = total_loss_dir / n
         avg_loss_vol = total_loss_vol / n

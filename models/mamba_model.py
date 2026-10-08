@@ -126,12 +126,21 @@ class MambaTradingModel(nn.Module):
 
     @torch.no_grad()
     def predict_trade_action(
-        self, x: torch.Tensor, confidence_threshold: float = 0.65
+        self, x: torch.Tensor, confidence_threshold: float = None
     ) -> Dict[str, any]:
         """
         High-level inference helper for live trading / backtesting.
         x: (1, seq_len, in_features)
+
+        confidence_threshold: If None, falls back to CONFIG.risk.MIN_CONFIDENCE_THRESHOLD
+                              so config.py changes automatically apply here too.
         """
+        if confidence_threshold is None:
+            try:
+                from config import CONFIG
+                confidence_threshold = CONFIG.risk.MIN_CONFIDENCE_THRESHOLD
+            except Exception:
+                confidence_threshold = 0.50  # safe fallback
         self.eval()
         out = self.forward(x)
         probs = out["direction_probs"][0].cpu().numpy()

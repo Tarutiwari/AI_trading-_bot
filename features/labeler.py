@@ -48,7 +48,9 @@ class TripleBarrierLabeler:
         lows = df["low"].values
         atrs = atr_series.values
 
-        labels = np.full(n, 1, dtype=int)  # Default 1: Neutral / Chop (safe default for warmup/NaN-ATR bars)
+        labels = np.full(n, -1, dtype=int)  # -1 = undefined sentinel (pipeline drops these via valid_mask)
+        # NOTE: Do NOT default to 1 (Neutral) — ATR warmup bars (~200 bars with NaN ATR)
+        # were silently becoming Neutral and artificially inflating its class count.
         realized_returns = np.zeros(n, dtype=float)
         realized_vols = np.zeros(n, dtype=float)
         barrier_bars = np.full(n, self.max_bars, dtype=int)

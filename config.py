@@ -137,7 +137,7 @@ class RiskManagementConfig:
     
     # Execution Guards
     MAX_ALLOWED_SPREAD_POINTS: float = 40.0  # Max spread in points allowed for entry
-    MIN_CONFIDENCE_THRESHOLD: float = 0.65   # Model softmax probability required to trigger
+    MIN_CONFIDENCE_THRESHOLD: float = 0.50   # Lowered from 0.65 → 0.50 (OOS max softmax was 0.43; re-tune after retrain)
     
     # Dynamic Order Management
     BREAKEVEN_R_MULTIPLE: float = 1.0   # Move SL to breakeven once price reaches 1R profit

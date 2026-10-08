@@ -76,7 +76,7 @@ def run_all_experiments():
         train_targets = train_l.dataset.target_directions
         class_counts = torch.bincount(train_targets, minlength=3).float()
         class_counts = torch.clamp(class_counts, min=1.0)
-        dir_weights = (len(train_targets) / (3.0 * class_counts)).to(exp_trainer.device)
+        dir_weights = (len(train_targets) / (3.0 * class_counts)).clamp(max=2.0).to(exp_trainer.device)  # match train.py cap
         test_criterion = MultiTaskTradingLoss(
             alpha_direction=exp["alpha"],
             beta_volatility=exp["beta"],

@@ -23,10 +23,8 @@ from features.correlation_pruner import CorrelationPruner
 
 
 class FeaturePipeline:
-    """
-    Master feature engineering and labeling pipeline for Gold (XAUUSD).
-    Guarantees strict zero-lookahead bias and broker scale invariance.
-    """
+    """ pipeline for Gold (XAUUSD).
+    Guarantees strict zero-lookahead bias and broker scale invariance."""
 
     def __init__(self, config: BotConfig = CONFIG):
         self.config = config
@@ -47,9 +45,7 @@ class FeaturePipeline:
         is_training: bool = True,
         save_to_disk: bool = True,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """
-        Processes multi-timeframe raw data into model-ready features X and labels Y.
-        """
+        
         primary_tf = self.config.instrument.PRIMARY_TIMEFRAME
         if primary_tf not in raw_data or raw_data[primary_tf].empty:
             raise ValueError(f"Primary timeframe [{primary_tf}] data missing from raw inputs.")
@@ -74,11 +70,16 @@ class FeaturePipeline:
         # Merge all feature blocks
         full_features = pd.concat([aligned_features, session_features], axis=1)
 
-        # Drop constant (zero-variance) features dynamically
-        constant_cols = [col for col in full_features.columns if full_features[col].nunique() <= 1]
-        if constant_cols:
-            print(f"[INFO] Dropping {len(constant_cols)} constant (zero-variance) features: {constant_cols}")
-            full_features.drop(columns=constant_cols, inplace=True)
+        # Drop constant (zero-variance) features dynamically.
+        # TRAINING ONLY: at inference a feature can be constant over the short
+        # recent window (e.g. next_is_cpi over 600 live bars) while still being a
+        # trained model input — dropping it would change the feature count and
+        # break the model's input layer. The fitted pruner handles final selection.
+        if is_training:
+            constant_cols = [col for col in full_features.columns if full_features[col].nunique() <= 1]
+            if constant_cols:
+                print(f"[INFO] Dropping {len(constant_cols)} constant (zero-variance) features: {constant_cols}")
+                full_features.drop(columns=constant_cols, inplace=True)
 
         # 3. Triple Barrier Labeling
         atr_series = aligned_features["atr"]
@@ -86,9 +87,15 @@ class FeaturePipeline:
 
         # 4. Clean NaNs created by rolling indicators & higher-TF lagging
         # Drop the warmup period
-        valid_mask = ~full_features.isnull().any(axis=1) & ~target_df.isnull().any(axis=1)
-        # Also drop the last max_bars where future labels are undefined
-        valid_mask.iloc[-self.config.labeling.MAX_HOLDING_BARS:] = False
+        valid_mask = ~full_features.isnull().any(axis=1)
+        if is_training:
+            # Labels need FUTURE bars: drop undefined labels (-1 sentinel from
+            # NaN/zero ATR at labeling time) and the last max_bars whose future
+            # window is incomplete. Inference needs NONE of this — the newest
+            # bars are exactly what the live bot must predict on.
+            valid_mask &= ~target_df.isnull().any(axis=1)
+            valid_mask &= target_df["target_direction"].isin([0, 1, 2])
+            valid_mask.iloc[-self.config.labeling.MAX_HOLDING_BARS:] = False
 
         X_clean = full_features[valid_mask].copy()
         y_clean = target_df[valid_mask].copy()
